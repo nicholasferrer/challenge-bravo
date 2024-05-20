@@ -1,6 +1,8 @@
 import { FastifyInstance, FastifyPluginOptions } from 'fastify';
-import currencyRoutes from './routes/currency';
+import currencyRoutes from './routes/currencyRoute';
+import { initializeCurrencies } from './services/currencyService';
 
 export default async function app(server: FastifyInstance, opts: FastifyPluginOptions) {
-  server.register(currencyRoutes);
+    initializeCurrencies();
+    server.register(currencyRoutes);
 }
