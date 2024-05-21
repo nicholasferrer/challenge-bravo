@@ -189,31 +189,4 @@ export function clearCurrencies() {
   currencies = [];
 }
 
-export async function getCurrency(code: string): Promise<{ code: string; type: CurrencyType; unit: string } | undefined> {
-  await updateRates();
-  const currency = currencies.find(c => c.code === code);
-  if (!currency) {
-    return undefined;
-  }
-
-  const conversionRateToUSD = getConversionRate(currency);
-  return {
-    code: currency.code,
-    type: currency.type,
-    unit: `${conversionRateToUSD.toFixed(2)} USD`
-  };
-}
-
-export async function getAllCurrencies(): Promise<{ code: string; type: CurrencyType; unit: string }[]> {
-  await updateRates();
-  return currencies.map(currency => {
-    const conversionRateToUSD = getConversionRate(currency);
-    return {
-      code: currency.code,
-      type: currency.type,
-      unit: `${conversionRateToUSD.toFixed(2)} USD`
-    };
-  });
-}
-
 initializeRates().catch(error => console.error(error));
