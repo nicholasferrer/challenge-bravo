@@ -1,3 +1,6 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import fastify from 'fastify';
 import app from './app';
 import swagger from "@fastify/swagger";

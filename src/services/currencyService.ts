@@ -17,9 +17,9 @@ let fiatRates: Rates = {};
 let cryptoRates: Rates = {};
 let symbolToIdMap: { [key: string]: string } = {};
 
-const exchangeRateAPI = 'https://v6.exchangerate-api.com/v6/edbc7ce270ca38c586e7b95f/latest/USD';
-const coinPriceGeckoAPI = 'https://api.coingecko.com/api/v3/simple/price';
-const symbolCoinGeckoAPI = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc';
+const exchangeRateAPI = `https://v6.exchangerate-api.com/v6/${process.env.EXCHANGE_RATE_API_KEY}/latest/USD`;
+const coinPriceGeckoAPI = `https://api.coingecko.com/api/v3/simple/price?x_cg_demo_api_key=${process.env.COIN_GECKO_API_KEY}`;
+const symbolCoinGeckoAPI = `https://api.coingecko.com/api/v3/coins/markets?x_cg_demo_api_key=${process.env.COIN_GECKO_API_KEY}&vs_currency=usd&order=market_cap_desc`;
 
 async function fetchFiatRates(): Promise<Rates> {
   const response = await axios.get(exchangeRateAPI);
@@ -41,7 +41,7 @@ async function fetchSymbolToIdMap(): Promise<{ [key: string]: string }> {
 
 async function fetchCryptoRates(symbolToIdMap: { [key: string]: string }): Promise<Rates> {
   const cryptoSymbols = Object.values(symbolToIdMap).join(',');
-  const response = await axios.get(`${coinPriceGeckoAPI}?ids=${cryptoSymbols}&vs_currencies=usd`);
+  const response = await axios.get(`${coinPriceGeckoAPI}&ids=${cryptoSymbols}&vs_currencies=usd`);
   const ratesData = response.data;
   return Object.keys(symbolToIdMap).reduce((acc, symbol) => {
     const id = symbolToIdMap[symbol];
@@ -100,10 +100,16 @@ export async function updateRates() {
     });
 
   } catch (error) {
-    console.error('Failed to update rates:', error);
-    throw new Error('Failed to update rates');
+    if (axios.isAxiosError(error) && error.response?.status === 429) {
+      console.error('Too many requests: Free plan limit reached, please wait 1 minute');
+      throw new Error('Too many requests: Free plan limit reached, please wait 1 minute');
+    } else {
+      console.error('Failed to update rates:', error);
+      throw new Error('Failed to update rates');
+    }
   }
 }
+
 
 export async function convertCurrency(from: string, to: string, amount: number): Promise<string> {
   await updateRates();
