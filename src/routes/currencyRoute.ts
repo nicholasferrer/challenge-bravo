@@ -17,7 +17,7 @@ async function currencyRoutes(server: FastifyInstance) {
         200: {
           type: 'object',
           properties: {
-            convertedAmount: { type: 'number' }
+            convertedAmount: { type: 'string' }
           }
         }
       }
