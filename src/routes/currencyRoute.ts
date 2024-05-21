@@ -1,5 +1,5 @@
 import { FastifyInstance } from 'fastify';
-import { convertCurrencyHandler, addCurrencyHandler, removeCurrencyHandler, getCurrencyHandler } from '../controllers/currencyController';
+import { convertCurrencyHandler, addCurrencyHandler, removeCurrencyHandler, getCurrencyHandler, getCurrenciesHandler } from '../controllers/currencyController';
 
 async function currencyRoutes(server: FastifyInstance) {
   server.get('/convert', {
@@ -89,6 +89,25 @@ async function currencyRoutes(server: FastifyInstance) {
       }
     },
     handler: getCurrencyHandler
+  });
+
+  server.get('/currencies', {
+    schema: {
+      response: {
+        200: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              code: { type: 'string' },
+              type: { type: 'string' },
+              unit: { type: 'string' }
+            }
+          }
+        }
+      }
+    },
+    handler: getCurrenciesHandler
   });
 }
 

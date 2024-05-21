@@ -1,5 +1,5 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { convertCurrency, addCurrency, removeCurrency, getCurrency, CurrencyType } from '../services/currencyService';
+import { convertCurrency, addCurrency, removeCurrency, getCurrency, CurrencyType, getAllCurrencies } from '../services/currencyService';
 
 interface ConvertCurrencyQuery {
     from: string;
@@ -65,6 +65,15 @@ export async function getCurrencyHandler(request: FastifyRequest<{ Params: GetCu
         } else {
             reply.send(currency);
         }
+    } catch (error) {
+        reply.status(400).send({ error: (error as Error).message });
+    }
+}
+
+export async function getCurrenciesHandler(request: FastifyRequest, reply: FastifyReply) {
+    try {
+        const currencies = await getAllCurrencies();
+        reply.send(currencies);
     } catch (error) {
         reply.status(400).send({ error: (error as Error).message });
     }

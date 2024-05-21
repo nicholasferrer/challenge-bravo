@@ -9,40 +9,59 @@ interface Currency {
 }
 
 interface Rates {
-  USD: number;
-  BRL: number;
-  EUR: number;
-  BTC: number;
-  ETH: number;
+  [key: string]: { code: string; type: CurrencyType; unitToUSD: number };
 }
 
 let currencies: Currency[] = [];
+let fiatRates: Rates = {};
+let cryptoRates: Rates = {};
+let symbolToIdMap: { [key: string]: string } = {};
 
-export function initializeCurrencies() {
-  currencies = [
-    { code: 'USD', type: 'FIAT' },
-    { code: 'BRL', type: 'FIAT' },
-    { code: 'EUR', type: 'FIAT' },
-    { code: 'BTC', type: 'CRYPTO' },
-    { code: 'ETH', type: 'CRYPTO' }
-  ];
-}
+const exchangeRateAPI = 'https://v6.exchangerate-api.com/v6/edbc7ce270ca38c586e7b95f/latest/USD';
+const coinPriceGeckoAPI = 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd';
+const symbolCoinGeckoAPI = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc';
 
-const coinGeckoAPI = 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd,brl,eur';
-
-export async function getLiveRates(): Promise<Rates> {
+export async function initializeRates() {
   try {
-    const response = await axios.get(coinGeckoAPI);
-    const rates = response.data;
-    return {
-      USD: 1, // USD is the base currency
-      BRL: rates.bitcoin.brl / rates.bitcoin.usd,
-      EUR: rates.bitcoin.eur / rates.bitcoin.usd,
-      BTC: rates.bitcoin.usd,
-      ETH: rates.ethereum.usd
-    };
+    // Fetch FIAT rates
+    const fiatResponse = await axios.get(exchangeRateAPI);
+    const fiatRatesData = fiatResponse.data.conversion_rates;
+    fiatRates = Object.keys(fiatRatesData).reduce((acc, code) => {
+      acc[code] = { code, type: 'FIAT' as CurrencyType, unitToUSD: fiatRatesData[code] };
+      return acc;
+    }, {} as Rates);
+
+    // Fetch symbol to ID mapping for CRYPTO
+    const symbolResponse = await axios.get(symbolCoinGeckoAPI);
+    const symbolData = symbolResponse.data;
+    symbolToIdMap = symbolData.reduce((acc: { [key: string]: string }, item: { id: string; symbol: string }) => {
+      acc[item.symbol.toUpperCase()] = item.id;
+      return acc;
+    }, {});
+
+    // Fetch CRYPTO rates using the symbol to ID mapping
+    const cryptoSymbols = Object.values(symbolToIdMap).join(',');
+    const cryptoResponse = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${cryptoSymbols}&vs_currencies=usd`);
+    const cryptoRatesData = cryptoResponse.data;
+
+    cryptoRates = Object.keys(symbolToIdMap).reduce((acc, symbol) => {
+      const id = symbolToIdMap[symbol];
+      if (cryptoRatesData[id] && cryptoRatesData[id].usd !== undefined) {
+        acc[symbol] = { code: symbol, type: 'CRYPTO' as CurrencyType, unitToUSD: cryptoRatesData[id].usd };
+      }
+      return acc;
+    }, {} as Rates);
+
+    currencies = [
+      { code: 'USD', type: 'FIAT' as CurrencyType, conversionRateToUSD: fiatRates['USD']?.unitToUSD },
+      { code: 'BRL', type: 'FIAT' as CurrencyType, conversionRateToUSD: fiatRates['BRL']?.unitToUSD },
+      { code: 'EUR', type: 'FIAT' as CurrencyType, conversionRateToUSD: fiatRates['EUR']?.unitToUSD },
+      { code: 'BTC', type: 'CRYPTO' as CurrencyType, conversionRateToUSD: cryptoRates['BTC']?.unitToUSD },
+      { code: 'ETH', type: 'CRYPTO' as CurrencyType, conversionRateToUSD: cryptoRates['ETH']?.unitToUSD }
+    ].filter(currency => currency.conversionRateToUSD !== undefined);
+
   } catch (error) {
-    throw new Error('Failed to fetch live rates');
+    throw new Error('Failed to initialize rates');
   }
 }
 
@@ -54,21 +73,23 @@ export async function convertCurrency(from: string, to: string, amount: number):
     throw new Error('Unsupported currency');
   }
 
-  const rates = await getLiveRates();
-
   let fromRate: number;
   let toRate: number;
 
   if (fromCurrency.type === 'FICTITIOUS') {
     fromRate = fromCurrency.conversionRateToUSD!;
+  } else if (fiatRates[fromCurrency.code]) {
+    fromRate = fiatRates[fromCurrency.code].unitToUSD;
   } else {
-    fromRate = rates[fromCurrency.code as keyof Rates]; // Type assertion
+    fromRate = cryptoRates[fromCurrency.code].unitToUSD;
   }
 
   if (toCurrency.type === 'FICTITIOUS') {
     toRate = toCurrency.conversionRateToUSD!;
+  } else if (fiatRates[toCurrency.code]) {
+    toRate = fiatRates[toCurrency.code].unitToUSD;
   } else {
-    toRate = rates[toCurrency.code as keyof Rates]; // Type assertion
+    toRate = cryptoRates[toCurrency.code].unitToUSD;
   }
 
   const amountInUSD = amount / fromRate;
@@ -84,17 +105,70 @@ export async function addCurrency(code: string, type: CurrencyType, conversionRa
     throw new Error('Currency already exists');
   }
 
-  if (type !== 'FICTITIOUS') {
-    const rates = await getLiveRates();
-    conversionRateToUSD = rates[code as keyof Rates];
+  if (type === 'FICTITIOUS') {
+    if (!conversionRateToUSD) {
+      throw new Error('Conversion rate to USD is required for fictitious currencies');
+    }
+    currencies.push({ code, type, conversionRateToUSD });
+    return;
   }
 
-  if (type === 'FICTITIOUS' && !conversionRateToUSD) {
-    throw new Error('Conversion rate to USD is required for fictitious currencies');
+  if (type === 'FIAT') {
+    if (!fiatRates[code]) {
+      // Fetch updated FIAT rates
+      const fiatResponse = await axios.get(exchangeRateAPI);
+      const fiatRatesData = fiatResponse.data.conversion_rates;
+      fiatRates = Object.keys(fiatRatesData).reduce((acc, fiatCode) => {
+        acc[fiatCode] = { code: fiatCode, type: 'FIAT', unitToUSD: fiatRatesData[fiatCode] };
+        return acc;
+      }, {} as Rates);
+
+      console.log("Updated fiatRates", fiatRates);
+
+      if (!fiatRates[code]) {
+        throw new Error('Unable to find conversion rate for the given FIAT code');
+      }
+    }
+
+    conversionRateToUSD = fiatRates[code].unitToUSD;
+    currencies.push({ code, type, conversionRateToUSD });
+    return;
   }
 
-  currencies.push({ code, type, conversionRateToUSD });
+  if (type === 'CRYPTO') {
+    if (!cryptoRates[code]) {
+      // Fetch symbol to ID mapping for CRYPTO
+      const symbolResponse = await axios.get(symbolCoinGeckoAPI);
+      const symbolData = symbolResponse.data;
+      symbolToIdMap = symbolData.reduce((acc: { [key: string]: string }, item: { id: string; symbol: string }) => {
+        acc[item.symbol.toUpperCase()] = item.id;
+        return acc;
+      }, {});
+
+      console.log("Updated symbolToIdMap", symbolToIdMap);
+
+      const cryptoId = symbolToIdMap[code];
+      if (!cryptoId) {
+        throw new Error('Unable to find ID for the given CRYPTO symbol');
+      }
+
+      // Fetch updated CRYPTO rates
+      const cryptoResponse = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${cryptoId}&vs_currencies=usd`);
+      const cryptoRatesData = cryptoResponse.data;
+
+      if (!cryptoRatesData[cryptoId] || cryptoRatesData[cryptoId].usd === undefined) {
+        throw new Error('Unable to find conversion rate for the given CRYPTO code');
+      }
+
+      cryptoRates[code] = { code, type: 'CRYPTO', unitToUSD: cryptoRatesData[cryptoId].usd };
+      console.log("Updated cryptoRates", cryptoRates);
+    }
+
+    conversionRateToUSD = cryptoRates[code].unitToUSD;
+    currencies.push({ code, type, conversionRateToUSD });
+  }
 }
+
 
 export function removeCurrency(code: string) {
   const index = currencies.findIndex(c => c.code === code);
@@ -109,20 +183,42 @@ export function clearCurrencies() {
 }
 
 export async function getCurrency(code: string): Promise<{ code: string; type: CurrencyType; unit: string } | undefined> {
-    const currency = currencies.find(c => c.code === code);
-    if (!currency) {
-      return undefined;
-    }
+  const currency = currencies.find(c => c.code === code);
+  if (!currency) {
+    return undefined;
+  }
 
+  let conversionRateToUSD = currency.conversionRateToUSD;
+
+  if (currency.type !== 'FICTITIOUS') {
+    if (fiatRates[code]) {
+      conversionRateToUSD = fiatRates[code].unitToUSD;
+    } else if (cryptoRates[code]) {
+      conversionRateToUSD = cryptoRates[code].unitToUSD;
+    } else {
+      throw new Error(`Unable to find conversion rate for ${code}`);
+    }
+  }
+
+  return {
+    code: currency.code,
+    type: currency.type,
+    unit: `${conversionRateToUSD} USD`
+  };
+}
+
+export async function getAllCurrencies(): Promise<{ code: string; type: CurrencyType; unit: string }[]> {
+  return currencies.map(currency => {
     let conversionRateToUSD = currency.conversionRateToUSD;
 
     if (currency.type !== 'FICTITIOUS') {
-      const rates = await getLiveRates();
-      conversionRateToUSD = rates[code as keyof Rates];
-    }
-
-    if (!conversionRateToUSD) {
-      throw new Error(`Unable to find conversion rate for ${code}`);
+      if (fiatRates[currency.code]) {
+        conversionRateToUSD = fiatRates[currency.code].unitToUSD;
+      } else if (cryptoRates[currency.code]) {
+        conversionRateToUSD = cryptoRates[currency.code].unitToUSD;
+      } else {
+        throw new Error(`Unable to find conversion rate for ${currency.code}`);
+      }
     }
 
     return {
@@ -130,5 +226,7 @@ export async function getCurrency(code: string): Promise<{ code: string; type: C
       type: currency.type,
       unit: `${conversionRateToUSD} USD`
     };
-  }
+  });
+}
 
+initializeRates().catch(error => console.error(error));
