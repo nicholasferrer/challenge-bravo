@@ -8,7 +8,7 @@ interface Currency {
   conversionRateToUSD?: number;
 }
 
-interface Rates {
+export interface Rates {
   [key: string]: { code: string; type: CurrencyType; unitToUSD: number };
 }
 
