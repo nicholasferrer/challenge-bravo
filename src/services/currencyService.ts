@@ -18,39 +18,45 @@ let cryptoRates: Rates = {};
 let symbolToIdMap: { [key: string]: string } = {};
 
 const exchangeRateAPI = 'https://v6.exchangerate-api.com/v6/edbc7ce270ca38c586e7b95f/latest/USD';
-const coinPriceGeckoAPI = 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd';
+const coinPriceGeckoAPI = 'https://api.coingecko.com/api/v3/simple/price';
 const symbolCoinGeckoAPI = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc';
+
+async function fetchFiatRates(): Promise<Rates> {
+  const response = await axios.get(exchangeRateAPI);
+  const ratesData = response.data.conversion_rates;
+  return Object.keys(ratesData).reduce((acc, code) => {
+    acc[code] = { code, type: 'FIAT', unitToUSD: ratesData[code] as number };
+    return acc;
+  }, {} as Rates);
+}
+
+async function fetchSymbolToIdMap(): Promise<{ [key: string]: string }> {
+  const response = await axios.get(symbolCoinGeckoAPI);
+  const symbolData = response.data;
+  return symbolData.reduce((acc: { [key: string]: string }, item: { id: string; symbol: string }) => {
+    acc[item.symbol.toUpperCase()] = item.id;
+    return acc;
+  }, {});
+}
+
+async function fetchCryptoRates(symbolToIdMap: { [key: string]: string }): Promise<Rates> {
+  const cryptoSymbols = Object.values(symbolToIdMap).join(',');
+  const response = await axios.get(`${coinPriceGeckoAPI}?ids=${cryptoSymbols}&vs_currencies=usd`);
+  const ratesData = response.data;
+  return Object.keys(symbolToIdMap).reduce((acc, symbol) => {
+    const id = symbolToIdMap[symbol];
+    if (ratesData[id] && ratesData[id].usd !== undefined) {
+      acc[symbol] = { code: symbol, type: 'CRYPTO', unitToUSD: ratesData[id].usd };
+    }
+    return acc;
+  }, {} as Rates);
+}
 
 export async function initializeRates() {
   try {
-    // Fetch FIAT rates
-    const fiatResponse = await axios.get(exchangeRateAPI);
-    const fiatRatesData = fiatResponse.data.conversion_rates;
-    fiatRates = Object.keys(fiatRatesData).reduce((acc, code) => {
-      acc[code] = { code, type: 'FIAT' as CurrencyType, unitToUSD: fiatRatesData[code] };
-      return acc;
-    }, {} as Rates);
-
-    // Fetch symbol to ID mapping for CRYPTO
-    const symbolResponse = await axios.get(symbolCoinGeckoAPI);
-    const symbolData = symbolResponse.data;
-    symbolToIdMap = symbolData.reduce((acc: { [key: string]: string }, item: { id: string; symbol: string }) => {
-      acc[item.symbol.toUpperCase()] = item.id;
-      return acc;
-    }, {});
-
-    // Fetch CRYPTO rates using the symbol to ID mapping
-    const cryptoSymbols = Object.values(symbolToIdMap).join(',');
-    const cryptoResponse = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${cryptoSymbols}&vs_currencies=usd`);
-    const cryptoRatesData = cryptoResponse.data;
-
-    cryptoRates = Object.keys(symbolToIdMap).reduce((acc, symbol) => {
-      const id = symbolToIdMap[symbol];
-      if (cryptoRatesData[id] && cryptoRatesData[id].usd !== undefined) {
-        acc[symbol] = { code: symbol, type: 'CRYPTO' as CurrencyType, unitToUSD: cryptoRatesData[id].usd };
-      }
-      return acc;
-    }, {} as Rates);
+    fiatRates = await fetchFiatRates();
+    symbolToIdMap = await fetchSymbolToIdMap();
+    cryptoRates = await fetchCryptoRates(symbolToIdMap);
 
     currencies = [
       { code: 'USD', type: 'FIAT' as CurrencyType, conversionRateToUSD: fiatRates['USD']?.unitToUSD },
@@ -61,11 +67,46 @@ export async function initializeRates() {
     ].filter(currency => currency.conversionRateToUSD !== undefined);
 
   } catch (error) {
+    console.error('Failed to initialize rates:', error);
     throw new Error('Failed to initialize rates');
   }
 }
 
+export async function updateRates() {
+  try {
+    const newFiatRates = await fetchFiatRates();
+    const newSymbolToIdMap = await fetchSymbolToIdMap();
+    const newCryptoRates = await fetchCryptoRates(newSymbolToIdMap);
+
+    fiatRates = newFiatRates;
+    symbolToIdMap = newSymbolToIdMap;
+    cryptoRates = newCryptoRates;
+
+    currencies = currencies.map(currency => {
+      let conversionRateToUSD;
+
+      if (currency.type === 'FIAT') {
+        conversionRateToUSD = newFiatRates[currency.code]?.unitToUSD;
+      } else if (currency.type === 'CRYPTO') {
+        conversionRateToUSD = newCryptoRates[currency.code]?.unitToUSD;
+      } else {
+        conversionRateToUSD = currency.conversionRateToUSD;
+      }
+
+      return {
+        ...currency,
+        conversionRateToUSD: conversionRateToUSD !== undefined ? conversionRateToUSD : currency.conversionRateToUSD
+      };
+    });
+
+  } catch (error) {
+    console.error('Failed to update rates:', error);
+    throw new Error('Failed to update rates');
+  }
+}
+
 export async function convertCurrency(from: string, to: string, amount: number): Promise<string> {
+  await updateRates();
   const fromCurrency = currencies.find(c => c.code === from);
   const toCurrency = currencies.find(c => c.code === to);
 
@@ -73,29 +114,23 @@ export async function convertCurrency(from: string, to: string, amount: number):
     throw new Error('Unsupported currency');
   }
 
-  let fromRate: number;
-  let toRate: number;
-
-  if (fromCurrency.type === 'FICTITIOUS') {
-    fromRate = fromCurrency.conversionRateToUSD!;
-  } else if (fiatRates[fromCurrency.code]) {
-    fromRate = fiatRates[fromCurrency.code].unitToUSD;
-  } else {
-    fromRate = cryptoRates[fromCurrency.code].unitToUSD;
-  }
-
-  if (toCurrency.type === 'FICTITIOUS') {
-    toRate = toCurrency.conversionRateToUSD!;
-  } else if (fiatRates[toCurrency.code]) {
-    toRate = fiatRates[toCurrency.code].unitToUSD;
-  } else {
-    toRate = cryptoRates[toCurrency.code].unitToUSD;
-  }
+  const fromRate = getConversionRate(fromCurrency);
+  const toRate = getConversionRate(toCurrency);
 
   const amountInUSD = amount / fromRate;
   const convertedAmount = amountInUSD * toRate;
 
-  return `${convertedAmount}`;
+  return `${convertedAmount.toFixed(2)}`;
+}
+
+function getConversionRate(currency: Currency): number {
+  if (currency.type === 'FICTITIOUS') {
+    return currency.conversionRateToUSD!;
+  } else if (fiatRates[currency.code]) {
+    return fiatRates[currency.code].unitToUSD;
+  } else {
+    return cryptoRates[currency.code].unitToUSD;
+  }
 }
 
 export async function addCurrency(code: string, type: CurrencyType, conversionRateToUSD?: number) {
@@ -115,21 +150,11 @@ export async function addCurrency(code: string, type: CurrencyType, conversionRa
 
   if (type === 'FIAT') {
     if (!fiatRates[code]) {
-      // Fetch updated FIAT rates
-      const fiatResponse = await axios.get(exchangeRateAPI);
-      const fiatRatesData = fiatResponse.data.conversion_rates;
-      fiatRates = Object.keys(fiatRatesData).reduce((acc, fiatCode) => {
-        acc[fiatCode] = { code: fiatCode, type: 'FIAT', unitToUSD: fiatRatesData[fiatCode] };
-        return acc;
-      }, {} as Rates);
-
-      console.log("Updated fiatRates", fiatRates);
-
+      fiatRates = await fetchFiatRates();
       if (!fiatRates[code]) {
         throw new Error('Unable to find conversion rate for the given FIAT code');
       }
     }
-
     conversionRateToUSD = fiatRates[code].unitToUSD;
     currencies.push({ code, type, conversionRateToUSD });
     return;
@@ -137,38 +162,20 @@ export async function addCurrency(code: string, type: CurrencyType, conversionRa
 
   if (type === 'CRYPTO') {
     if (!cryptoRates[code]) {
-      // Fetch symbol to ID mapping for CRYPTO
-      const symbolResponse = await axios.get(symbolCoinGeckoAPI);
-      const symbolData = symbolResponse.data;
-      symbolToIdMap = symbolData.reduce((acc: { [key: string]: string }, item: { id: string; symbol: string }) => {
-        acc[item.symbol.toUpperCase()] = item.id;
-        return acc;
-      }, {});
-
-      console.log("Updated symbolToIdMap", symbolToIdMap);
-
+      symbolToIdMap = await fetchSymbolToIdMap();
       const cryptoId = symbolToIdMap[code];
       if (!cryptoId) {
         throw new Error('Unable to find ID for the given CRYPTO symbol');
       }
-
-      // Fetch updated CRYPTO rates
-      const cryptoResponse = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${cryptoId}&vs_currencies=usd`);
-      const cryptoRatesData = cryptoResponse.data;
-
-      if (!cryptoRatesData[cryptoId] || cryptoRatesData[cryptoId].usd === undefined) {
+      cryptoRates = await fetchCryptoRates(symbolToIdMap);
+      if (!cryptoRates[code]) {
         throw new Error('Unable to find conversion rate for the given CRYPTO code');
       }
-
-      cryptoRates[code] = { code, type: 'CRYPTO', unitToUSD: cryptoRatesData[cryptoId].usd };
-      console.log("Updated cryptoRates", cryptoRates);
     }
-
     conversionRateToUSD = cryptoRates[code].unitToUSD;
     currencies.push({ code, type, conversionRateToUSD });
   }
 }
-
 
 export function removeCurrency(code: string) {
   const index = currencies.findIndex(c => c.code === code);
@@ -183,48 +190,28 @@ export function clearCurrencies() {
 }
 
 export async function getCurrency(code: string): Promise<{ code: string; type: CurrencyType; unit: string } | undefined> {
+  await updateRates();
   const currency = currencies.find(c => c.code === code);
   if (!currency) {
     return undefined;
   }
 
-  let conversionRateToUSD = currency.conversionRateToUSD;
-
-  if (currency.type !== 'FICTITIOUS') {
-    if (fiatRates[code]) {
-      conversionRateToUSD = fiatRates[code].unitToUSD;
-    } else if (cryptoRates[code]) {
-      conversionRateToUSD = cryptoRates[code].unitToUSD;
-    } else {
-      throw new Error(`Unable to find conversion rate for ${code}`);
-    }
-  }
-
+  const conversionRateToUSD = getConversionRate(currency);
   return {
     code: currency.code,
     type: currency.type,
-    unit: `${conversionRateToUSD} USD`
+    unit: `${conversionRateToUSD.toFixed(2)} USD`
   };
 }
 
 export async function getAllCurrencies(): Promise<{ code: string; type: CurrencyType; unit: string }[]> {
+  await updateRates();
   return currencies.map(currency => {
-    let conversionRateToUSD = currency.conversionRateToUSD;
-
-    if (currency.type !== 'FICTITIOUS') {
-      if (fiatRates[currency.code]) {
-        conversionRateToUSD = fiatRates[currency.code].unitToUSD;
-      } else if (cryptoRates[currency.code]) {
-        conversionRateToUSD = cryptoRates[currency.code].unitToUSD;
-      } else {
-        throw new Error(`Unable to find conversion rate for ${currency.code}`);
-      }
-    }
-
+    const conversionRateToUSD = getConversionRate(currency);
     return {
       code: currency.code,
       type: currency.type,
-      unit: `${conversionRateToUSD} USD`
+      unit: `${conversionRateToUSD.toFixed(2)} USD`
     };
   });
 }

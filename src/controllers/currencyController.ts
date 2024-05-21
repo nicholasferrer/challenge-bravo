@@ -21,7 +21,7 @@ export async function convertCurrencyHandler(request: FastifyRequest<{ Querystri
     const { from, to, amount } = request.query;
 
     try {
-        const convertedAmount = await convertCurrency(from, to, parseFloat(amount));
+        const convertedAmount = await convertCurrency(from.toUpperCase(), to.toUpperCase(), parseFloat(amount));
         reply.send({ convertedAmount });
     } catch (error) {
         reply.status(400).send({ error: (error as Error).message });
@@ -37,8 +37,8 @@ export async function addCurrencyHandler(request: FastifyRequest<{ Body: AddCurr
     }
 
     try {
-        await addCurrency(code, type as CurrencyType, conversionRateToUSD);
-        reply.code(201).send({ code, type, conversionRateToUSD });
+        await addCurrency(code.toUpperCase(), type as CurrencyType, conversionRateToUSD);
+        reply.code(201).send({ code: code.toUpperCase(), type, conversionRateToUSD });
     } catch (error) {
         reply.status(400).send({ error: (error as Error).message });
     }
@@ -48,7 +48,7 @@ export async function removeCurrencyHandler(request: FastifyRequest<{ Params: { 
     const { code } = request.params;
 
     try {
-        removeCurrency(code);
+        removeCurrency(code.toUpperCase());
         reply.status(204).send();
     } catch (error) {
         reply.status(400).send({ error: (error as Error).message });
@@ -59,7 +59,7 @@ export async function getCurrencyHandler(request: FastifyRequest<{ Params: GetCu
     const { code } = request.params;
 
     try {
-        const currency = await getCurrency(code);
+        const currency = await getCurrency(code.toUpperCase());
         if (!currency) {
             reply.status(404).send({ error: 'Currency not found' });
         } else {
