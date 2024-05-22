@@ -67,8 +67,13 @@ export async function initializeRates() {
     ].filter(currency => currency.conversionRateToUSD !== undefined);
 
   } catch (error) {
-    console.error('Failed to initialize rates:', error);
-    throw new Error('Failed to initialize rates');
+    if (axios.isAxiosError(error) && error.response?.status === 429) {
+      console.error('Too many requests: Free plan limit reached, please wait 1 minute');
+      throw new Error('Too many requests: Free plan limit reached, please wait 1 minute');
+    } else {
+      console.error('Failed to initialize rates:', error);
+      throw new Error('Failed to initialize rates');
+    }
   }
 }
 

@@ -43,8 +43,8 @@ export async function addCurrencyHandler(request: FastifyRequest<{ Body: AddCurr
     }
 
     try {
-        await addCurrency(code.toUpperCase(), type as CurrencyType, conversionRateToUSD);
-        reply.code(201).send({ code: code.toUpperCase(), type, conversionRateToUSD });
+        await addCurrency(code.toUpperCase(), type.toUpperCase() as CurrencyType, conversionRateToUSD);
+        reply.code(201).send({ code, type, conversionRateToUSD });
     } catch (error) {
         reply.status(400).send({ error: (error as Error).message });
     }
