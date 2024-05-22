@@ -131,7 +131,7 @@ export async function convertCurrency(from: string, to: string, amount: number):
   const amountInUSD = amount / fromRate;
   const convertedAmount = amountInUSD * toRate;
 
-  return `${convertedAmount.toFixed(2)}`;
+  return convertedAmount >= 1 ? `${convertedAmount.toFixed(2)}` : `${convertedAmount.toFixed(6)}`;
 }
 
 function getConversionRate(currency: Currency): number {
