@@ -1,0 +1,13 @@
+config:
+  target: "http://localhost:3000"
+  phases:
+    - duration: 5
+      arrivalRate: 1000
+scenarios:
+  - flow:
+      - get:
+          url: "/convert"
+          qs:
+            from: "USD"
+            to: "BRL"
+            amount: "5000"
