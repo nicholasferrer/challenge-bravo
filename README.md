@@ -73,20 +73,30 @@ Add a new currency to the supported list.
 - **Method:** `POST`
 - **Body Parameters:**
   - `code` (string): Currency code
-  - `type` (string): Type of currency (**FIAT, CRYPTO, FICTITIOUS**)
-  - `conversionRateToUSD`  (number): Conversion rate to USD
+  - `type` (string): Type of currency (**FIAT, CRYPTO, FIAT**)
+  - `conversionRateToUSD`  (number): Conversion rate to USD `*required with type FICTITIOUS and not considered in types FIAT and FIAT`
 
 **Example Request:**
 
 ```bash
 POST /currencies
 
-body:
+body examples:
 
 {
   "code": "HURB",
   "type": "FICTITIOUS",
   "conversionRateToUSD": 0.05
+}
+
+{
+  "code": "SOL",
+  "type": "CRYPTO"
+}
+
+{
+  "code": "AED",
+  "type": "FIAT"
 }
 ```
 
